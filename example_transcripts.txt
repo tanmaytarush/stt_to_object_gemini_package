@@ -1,0 +1,123 @@
+# Example spoken turns for voice_logging.
+# Use with:  python -m voice_logging --contractor-id 1 --text
+# One line = one turn. A blank line clears the record (in --text mode).
+# Lines starting with # are notes — do not paste those into --text.
+
+# ---------------------------------------------------------------------------
+# ENGLISH
+# ---------------------------------------------------------------------------
+
+# Client — one shot (name + phone + labour only)
+Add client Ramesh Kumar, phone 9876543210, labour only.
+
+# Client — one shot (material and labour + amount)
+Add a new client Priya Sharma, number 9123456780, material and labour, total two lakh fifty thousand.
+
+# Client — field by field (paste one line, wait, then the next)
+New client Suresh Patil
+phone nine eight seven six five four three two one zero
+labour only
+total amount seventy five thousand
+
+# Client — correction
+no, not labour only, material and labour both
+
+# Dealer — one shot (phone optional)
+Add dealer Sharma Traders, phone 9988776655
+
+# Dealer — name only
+Add supplier Gupta Hardware and Sons
+
+# ---------------------------------------------------------------------------
+# HINDI  (as Gemini live often returns it — Devanagari)
+# ---------------------------------------------------------------------------
+
+# Client — one shot
+नया क्लाइंट रमेश कुमार ऐड करें जिसका फोन नंबर है 9876543210 सिर्फ लेबर।
+
+# Client — one shot with amount
+प्रिया शर्मा को क्लाइंट बनाओ, नंबर 9123456780, माल और मजदूरी दोनों, टोटल डेढ़ लाख।
+
+# Client — field by field
+नया क्लाइंट सुरेश पाटिल
+फोन नौ आठ सात छह पांच चार तीन दो एक शून्य
+सिर्फ मजदूरी
+पचहत्तर हज़ार का काम
+
+# Client — correction
+नहीं, सिर्फ लेबर नहीं, माल और मजदूरी दोनों
+
+# Dealer
+डीलर शर्मा ट्रेडर्स ऐड करो, फोन 9988776655
+गुप्ता हार्डवेयर एंड संस सप्लायर है
+
+# Hinglish (Latin script — also common from STT)
+naya client Ramesh Kumar
+phone nau aath saat chhe paanch chaar teen do ek shunya
+sirf labour
+maal aur mazdoori dono, total do lakh pachaas hazaar
+dealer Sharma Traders
+
+# ---------------------------------------------------------------------------
+# KANNADA
+# ---------------------------------------------------------------------------
+
+# Client — one shot
+ಹೊಸ ಗ್ರಾಹಕ ರಮೇಶ್ ಕುಮಾರ್ ಆ್ಯಡ್ ಮಾಡಿ, ಫೋನ್ 9876543210, ಕೂಲಿ ಮಾತ್ರ.
+
+# Client — one shot with amount
+ಪ್ರಿಯಾ ಶರ್ಮಾ ಅವರನ್ನು ಕ್ಲೈಂಟ್ ಮಾಡಿ, ನಂಬರ್ 9123456780, ಸಾಮಗ್ರಿ ಜೊತೆ ಕೆಲಸ, ಒಟ್ಟು ಒಂದೂವರೆ ಲಕ್ಷ.
+
+# Client — field by field
+ಹೊಸ ಗ್ರಾಹಕ ಸುರೇಶ್ ಪಾಟೀಲ್
+ಫೋನ್ ಒಂಬತ್ತು ಎಂಟು ಏಳು ಆರು ಐದು ನಾಲ್ಕು ಮೂರು ಎರಡು ಒಂದು ಸೊನ್ನೆ
+ಕೂಲಿ ಮಾತ್ರ
+ಎಪ್ಪತ್ತೈದು ಸಾವಿರದ ಕೆಲಸ
+
+# Client — correction
+ಇಲ್ಲ, ಕೂಲಿ ಮಾತ್ರ ಅಲ್ಲ, ಸಾಮಗ್ರಿ ಸಹಿತ
+
+# Dealer
+ಡೀಲರ್ ಶರ್ಮಾ ಟ್ರೇಡರ್ಸ್ ಆ್ಯಡ್ ಮಾಡಿ, ಫೋನ್ 9988776655
+ಗುಪ್ತಾ ಹಾರ್ಡ್‌ವೇರ್ ಅಂಡ್ ಸನ್ಸ್ ಅಂಗಡಿ
+
+# Kannada in Latin script (if STT transliterates).
+# Paste ONE line at a time. The phone line is spoken digits, not "missing".
+#   ombattu=9 entu=8 elu=7 aaru=6 aidu=5 naalku=4 mooru=3 eradu=2 ondu=1 sonne=0
+#   → 9876543210
+hosa graahaka Ramesh Kumar
+phone ombattu entu elu aaru aidu naalku mooru eradu ondu sonne
+kooli matra
+# next line CORRECTS labour-only → material+labour, amount 5000 (aidu savira)
+samagri jothe, savira aidu
+dealer Sharma Traders
+
+# ---------------------------------------------------------------------------
+# REGRESSION — the first live Kannada run
+# ---------------------------------------------------------------------------
+# Everything said in one breath. This turn used to come back as a bare
+# "no record in that" and lose all five facts, because it holds two entities
+# (client Ramesh Kumar + dealer Dermot Traders) AND two contradictory project
+# types (kooli matra = labour only, samagri jothe = with material).
+#
+# It must now yield:
+#   captured [CLIENT] name='Ramesh Kumar'
+#   ! also heard DEALER Dermot Traders — not captured, say it again on its own
+#   note: ... projectType stated both ways ...
+#   still need: phoneNumber, projectType
+# The phone is 8 digits and is correctly dropped rather than padded.
+Hosa grahaka Ramesh Kumar phone number 92665243. Kooli matra samagri jothe savira aidu dealer Dermot Traders.
+
+# ---------------------------------------------------------------------------
+# EXPECTED DTO (after a complete client turn)
+# ---------------------------------------------------------------------------
+# {
+#   "contractorId": 1,
+#   "clientName": "Ramesh Kumar",
+#   "phoneNumber": "9876543210",
+#   "projectType": "LABOUR_ONLY"
+# }
+#
+# projectType:
+#   labour only / sirf labour / सिर्फ लेबर / कूಲಿ ಮಾತ್ರ     → LABOUR_ONLY
+#   material and labour / maal aur mazdoori / माल और मजदूरी / ಸಾಮಗ್ರಿ ಜೊತೆ → MATERIAL_AND_LABOUR
