@@ -1,0 +1,94 @@
+# Long use-cases for voice_logging --text mode.
+#
+#   cd scripts
+#   python -m voice_logging --contractor-id 1 --client-id 12 --text
+#
+# Paste ONE line at a time. A blank line clears the list for the next session.
+# Lines starting with # are notes — do not paste those.
+#
+# These are the same turns as `python -m voice_logging.hardtest`.
+# Live scoring (needs GEMINI_API_KEY):
+#   python -m voice_logging.hardtest
+
+# ---------------------------------------------------------------------------
+# site-dump-oneshot — 10 items + dealer + phone + bill + date in one breath
+# expect: 10 bag cement, 5 kg Fevicol SH, 2 tin Dr. Fixit, 3 packet M-Seal,
+#         1 peti Fevikwik, 4 nag plywood, 20 bori sariya, 1 roll Roff,
+#         7 litre Fevicol Marine, 6 bag white cement
+# ---------------------------------------------------------------------------
+haan bhai kal subah ke liye poora maal nikaal — das bag Ultratech cement, paanch kilo Fevicol SH, do tin Dr. Fixit LW Plus, teen packet M-Seal, ek peti Fevikwik, chaar nag 18mm plywood, bees bori TMT sariya 12mm, ek roll Roff Rainbow Tile Mate, saat litre Fevicol Marine, aur chhe bag white cement. Sharma Traders se le aana, phone nau do chhe chhe paanch do chaar teen, bill lagbhag unnees hazaar, client Ramesh Kumar ke Andheri site pe, kal subah saat baje chahiye, advance paanch hazaar de dena.
+
+# ---------------------------------------------------------------------------
+# multi-turn-then-correct — append, chatter, incomplete, fraction, then nahi
+# expect after last line: 8 bag cement, 5 kg Fevicol SH, 2 tin Dr. Fixit,
+#         3 packet M-Seal, 1 peti Fevikwik, 4 nag plywood
+# (putty and dedh bag white cement must never appear)
+# ---------------------------------------------------------------------------
+pehle cement nikaal, das bag Ultratech
+uske baad paanch kilo Fevicol SH bhi daal
+Sharma Traders ko call kar dena, theek hai na?
+do tin Dr. Fixit Pidiproof aur thoda wall putty bhi laao
+teen packet M-Seal
+dedh bag white cement extra rakhna
+ek peti Fevikwik, chaar nag plywood
+nahi nahi galat ho gaya — sun, aath bag cement, paanch kilo Fevicol SH, do tin Dr. Fixit Pidiproof, teen packet M-Seal, ek peti Fevikwik, chaar nag plywood. Putty mat lena, white cement bhi nahi.
+
+# ---------------------------------------------------------------------------
+# waterproofing-kit — Devanagari then Hinglish, 9 rows
+# ---------------------------------------------------------------------------
+टेरेस वाटरप्रूफिंग का माल — चार टिन डॉ फिक्सीट एल डब्ल्यू प्लस, दो किलो डॉ फिक्सीट पीडीप्रूफ, एक किलो रॉफ टाइल एडहेसिव।
+uske saath das bag cement, paanch kilo Fevicol SH, teen litre primer, do roll Roff Rainbow Tile Mate
+grout teen kilo, aur ek dabba Fevistik
+bill eighteen thousand hai, dealer Gupta Hardware, date kal ki rakho — maal mein mat daalna
+
+# ---------------------------------------------------------------------------
+# kannada-codeswitch — Latin Kannada STT + ille correction
+# expect: 8 bag cement (not 10), rest kept
+# ---------------------------------------------------------------------------
+Hosa samagri: hattu bag cement, aidu kilo Fevicol SH, eradu tin Dr. Fixit. Graahaka Ramesh, angadi Sharma Traders, savira aidu rupayi total — idanna bidu.
+mooru packet M-Seal kooda, naalku nag plywood, ondu peti Fevikwik
+aaru litre Fevicol Marine, elu bag white cement
+illa, cement entu bag maatra. Remaining same: aidu kilo Fevicol SH, eradu tin Dr. Fixit, mooru packet M-Seal, naalku nag plywood, ondu peti Fevikwik, aaru litre Fevicol Marine, elu bag white cement.
+
+# ---------------------------------------------------------------------------
+# gujarati-marathi-mix — three languages, English correction is the source of truth
+# ---------------------------------------------------------------------------
+das bag cement ane panch kilo Fevicol SH, be tin Dr. Fixit, tran packet M-Seal. Gupta Hardware thi levu, bill bar hazaar.
+दहा बॅग सिमेंट आधीच आहे त्यात आणखी दोन टीन डॉ फिक्सीट नको — एक पेटि फेविक्विक आणि चार नाग प्लायवुड घाल.
+actually no, listen to the full list once: eight bags cement, five kg Fevicol SH, two tins Dr. Fixit, three packets M-Seal, one peti Fevikwik, four nag plywood, six litre Fevicol Marine.
+
+# ---------------------------------------------------------------------------
+# drop-minefield — 11 junk turns, only the last two complete rows survive
+# expect: 10 bag cement, 5 kg Fevicol SH
+# ---------------------------------------------------------------------------
+kal subah chahiye, jaldi bhej dena
+thoda cement bhi laao
+paanch cement
+dedh bag cement
+sawa tin Dr. Fixit
+paune kilo Fevicol
+Sharma Traders ko bhej dena
+client Ramesh Kumar ka order hai
+total bara hazaar rupaye
+haan theek hai bhai
+das bag cement
+aur putty bhi
+paanch kilo Fevicol SH
+
+# ---------------------------------------------------------------------------
+# stt-garbled-brands — SMART-STT style mishearings in one dump
+# ---------------------------------------------------------------------------
+ok so ten bags cement then five kilo fee vicol SH then two tins doctor fix it L W plus then three packets em seal then one carton fevi quick then four numbers ply wood eighteen mm then twenty bori T M T sariya then one roll roff rainbow tile mate then seven liter fevicol marine from the shop, total twelve thousand, phone number nine eight seven six five four three two one, deliver tomorrow morning.
+
+# ---------------------------------------------------------------------------
+# labour-chatter-then-list — ignore labour talk, then 9 items, then qty fix 20→19
+# ---------------------------------------------------------------------------
+mistri ko bol mazdoori alag, yeh sirf maal ka order hai, MATERIAL_AND_LABOUR nahi banana
+site pe already primer pada hai, naya mat lena
+ab maal: bees bag cement, das kilo Fevicol SH, chaar tin Dr. Fixit, chhe packet M-Seal, do peti Fevikwik, aath nag plywood, pachees bori sariya, teen roll Roff, baarah litre Fevicol Marine
+sorry, cement bees nahi, unnees bag cement — baaki same, das kilo Fevicol SH, chaar tin Dr. Fixit, chhe packet M-Seal, do peti Fevikwik, aath nag plywood, pachees bori sariya, teen roll Roff, baarah litre Fevicol Marine
+
+# ---------------------------------------------------------------------------
+# unit-as-spoken — bori/katta/thaila/nag/dabba/peti must not be converted
+# ---------------------------------------------------------------------------
+pachees bori cement, das katta sariya, paanch thaila white cement, baarah nag plywood, teen dabba Fevicol SH, ek peti Fevikwik, do quintal TMT, chaar bundle pipe, ek litre thinner, sau piece tile spacer

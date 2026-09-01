@@ -446,6 +446,92 @@ def test_turn_buffer() -> None:
     check("reset: clears entity and fields", (ex.entity, ex.fields), (None, {}))
 
 
+def test_long_accumulation_then_correction() -> None:
+    """Offline stand-in for the multi-turn hard scenario — merge only."""
+    ex = Extractor(_settings())
+    for name, qty, uom in (
+        ("cement", 10, "bag"),
+        ("Fevicol SH", 5, "kg"),
+        ("Dr. Fixit Pidiproof", 2, "tin"),
+        ("M-Seal", 3, "packet"),
+        ("Fevikwik", 1, "peti"),
+        ("plywood", 4, "nag"),
+        ("TMT sariya", 20, "bori"),
+        ("Roff Rainbow Tile Mate", 1, "roll"),
+        ("Fevicol Marine", 7, "litre"),
+        ("white cement", 6, "bag"),
+    ):
+        ex._merge(name, _extraction(items=[_item(name, qty, uom)]))
+    check("long list: 10 rows before correction",
+          len(ex.fields["items"]), 10)
+    ex._merge(
+        "nahi, shorter list",
+        _extraction(is_correction=True, items=[
+            _item("cement", 8, "bag"),
+            _item("Fevicol SH", 5, "kg"),
+            _item("Dr. Fixit Pidiproof", 2, "tin"),
+            _item("M-Seal", 3, "packet"),
+            _item("Fevikwik", 1, "peti"),
+            _item("plywood", 4, "nag"),
+        ]),
+    )
+    check("long list: correction keeps 6",
+          len(ex.fields["items"]), 6)
+    check("long list: cement qty replaced",
+          ex.fields["items"][0],
+          {"itemName": "cement", "quantity": 8, "uom": "bag"})
+
+
+def test_hard_quota_backoff() -> None:
+    from .hardtest import _quota_retry_delay, _short_error
+
+    quota = (
+        "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You "
+        "exceeded your current quota. Please retry in 20.518069834s.'}}"
+    )
+    check("quota: server delay honoured with a margin",
+          _quota_retry_delay(quota), 21.518069834)
+    check("quota: retryDelay field is the fallback",
+          _quota_retry_delay("429 {'retryDelay': '17s'}"), 18.0)
+    check("quota: an unlabelled 429 still backs off",
+          _quota_retry_delay("429 RESOURCE_EXHAUSTED"), 30.0)
+    check("quota: a timeout is not retried as quota",
+          _quota_retry_delay("extraction timed out after 60s"), None)
+    check("quota: the wall of JSON collapses to one line",
+          _short_error(quota),
+          "429 quota exhausted (raise --rpm spacing or wait for the window)")
+
+
+def test_hard_row_matching() -> None:
+    from .hardtest import _row_matches, _score
+    from .hard_scenarios import ExpectRow, Scenario
+
+    cement = {"itemName": "Ultratech cement", "quantity": 10, "uom": "bag"}
+    white = {"itemName": "white cement", "quantity": 6, "uom": "bags"}
+    fevicol = {"itemName": "Fevicol S.H.", "quantity": 5, "uom": "kilo"}
+    check("matcher: cement does not steal white cement",
+          _row_matches(white, ExpectRow(("cement",), 10, "bag")), False)
+    check("matcher: white cement needs both needles",
+          _row_matches(white, ExpectRow(("white", "cement"), 6, "bag")), True)
+    check("matcher: kilo aliases to kg",
+          _row_matches(fevicol, ExpectRow(("fevicol", "sh"), 5, "kg")), True)
+    check("matcher: bags aliases to bag",
+          _row_matches(cement, ExpectRow(("cement",), 10, "bag")), True)
+
+    scenario = Scenario(
+        id="x", title="t", turns=("t",),
+        expect=(ExpectRow(("cement",), 10, "bag"),
+                ExpectRow(("white", "cement"), 6, "bag")),
+        forbidden=("sharma",),
+    )
+    report = _score(scenario, [cement, white], [], [], 1)
+    check("score: two distinct cement rows pass", report.ok, True)
+    report = _score(scenario, [cement, white, {
+        "itemName": "Sharma Traders", "quantity": 1, "uom": "bag",
+    }], [], [], 1)
+    check("score: forbidden dealer name fails", report.ok, False)
+
+
 # --- runner -----------------------------------------------------------------
 
 TESTS = [
@@ -464,6 +550,9 @@ TESTS = [
     ("manual edit", test_manual_edit),
     ("curl rendering", test_curl_rendering),
     ("turn buffer", test_turn_buffer),
+    ("long accumulation then correction", test_long_accumulation_then_correction),
+    ("hard row matching", test_hard_row_matching),
+    ("hard quota backoff", test_hard_quota_backoff),
 ]
 
 
