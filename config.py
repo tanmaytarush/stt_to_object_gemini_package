@@ -86,17 +86,18 @@ DEFAULT_LANGUAGES = ["hi-IN", "gu-IN", "mr-IN", "kn-IN", "en-IN"]
 class Settings:
     api_key: str
     contractor_id: int
+    client_id: int | None
+    dealer_id: int | None
+    order_type: str
     user_id: str
     base_url: str
     languages: list[str]
     silence_seconds: float
     min_confidence: float
-    name_script: str
     input_device: int | None
     text_mode: bool
     post: bool
     dry_run: bool
-    strict_entity: bool
     verbose: bool
     log_path: Path
     transcript_mode: str
@@ -127,12 +128,8 @@ class Settings:
         return []
 
     @property
-    def client_url(self) -> str:
-        return f"{self.base_url}/starship/v1/client"
-
-    @property
-    def dealer_url(self) -> str:
-        return f"{self.base_url}/starship/v1/material-dealer"
+    def order_url(self) -> str:
+        return f"{self.base_url}/starship/v1/material-order"
 
 
 def _load_dotenv() -> None:
@@ -159,13 +156,23 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m voice_logging",
         description=(
-            "Speak Hindi/Gujarati/Marathi/Indian-English into the mic; get a "
-            "validated starship CreateClient/CreateDealer request body out."
+            "Speak the Items section of a New Order screen: item, quantity, "
+            "unit. The dealer, the client and the order type come from the "
+            "screen — voice never sets them."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--contractor-id", type=int, default=None,
                    help="Owning contractor. Env: CONTRACTOR_ID. Never inferred from speech.")
+    p.add_argument("--client-id", type=int, default=None,
+                   help="Existing client picked on the order screen. Optional, "
+                        "like the screen's dropdown. Env: CLIENT_ID.")
+    p.add_argument("--dealer-id", type=int, default=None,
+                   help="Existing dealer picked on the order screen. Optional, "
+                        "like the screen's dropdown. Env: DEALER_ID.")
+    p.add_argument("--order-type", choices=("MAT_ORDER", "MAT_LIST"), default=None,
+                   help="Set by the screen, never by speech. Env: ORDER_TYPE. "
+                        "(default: MAT_ORDER)")
     p.add_argument("--user-id", default=None,
                    help="Sent as X-USER-ID; drives created_by. Env: STARSHIP_USER_ID.")
     p.add_argument("--base-url", default=None,
@@ -182,8 +189,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Seconds of quiet that end a turn and trigger extraction.")
     p.add_argument("--min-confidence", type=float, default=0.55,
                    help="Discard extractions below this confidence.")
-    p.add_argument("--name-script", choices=("latin", "native"), default="latin",
-                   help="Romanize names, or keep them in the spoken script.")
     p.add_argument("--transcript-mode", choices=("SMART", "VERBATIM"), default="SMART",
                    help="SMART strips filler words and formats alphanumerics.")
     p.add_argument("--input-device", type=int, default=None,
@@ -198,13 +203,27 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Offer to POST each completed object to starship.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the equivalent curl instead of sending. Implies --post.")
-    p.add_argument("--strict-entity", action="store_true",
-                   help="Refuse to switch between CLIENT and DEALER mid-object.")
     p.add_argument("--verbose", action="store_true",
                    help="Append a JSONL trace of every stage to --log-file.")
     p.add_argument("--log-file", default="voice_logging.log",
                    help="Where --verbose writes its JSONL trace.")
     return p
+
+
+def _optional_positive_id(cli_value: int | None, env_name: str, label: str) -> int | None:
+    raw = cli_value
+    if raw is None:
+        env_value = os.environ.get(env_name, "").strip()
+        if env_value:
+            try:
+                raw = int(env_value)
+            except ValueError:
+                raise SystemExit(f"{env_name} must be an integer, got {env_value!r}")
+    if raw is None:
+        return None
+    if raw <= 0:
+        raise SystemExit(f"{label} must be greater than 0")
+    return raw
 
 
 def resolve(args: argparse.Namespace) -> Settings:
@@ -239,6 +258,14 @@ def resolve(args: argparse.Namespace) -> Settings:
     if raw_contractor <= 0:
         raise SystemExit("contractorId must be greater than 0 (the API rejects 0).")
 
+    # Both are optional on the order screen itself, so neither is required here.
+    client_id = _optional_positive_id(args.client_id, "CLIENT_ID", "clientId")
+    dealer_id = _optional_positive_id(args.dealer_id, "DEALER_ID", "dealerId")
+
+    order_type = (args.order_type or os.environ.get("ORDER_TYPE") or "MAT_ORDER").strip().upper()
+    if order_type not in ("MAT_ORDER", "MAT_LIST"):
+        raise SystemExit(f"orderType must be MAT_ORDER or MAT_LIST, got {order_type!r}")
+
     if args.languages is not None:
         raw_languages = args.languages
     else:
@@ -263,17 +290,18 @@ def resolve(args: argparse.Namespace) -> Settings:
     return Settings(
         api_key=api_key,
         contractor_id=raw_contractor,
+        client_id=client_id,
+        dealer_id=dealer_id,
+        order_type=order_type,
         user_id=args.user_id or os.environ.get("STARSHIP_USER_ID") or "1",
         base_url=base_url,
         languages=languages,
         silence_seconds=args.silence_seconds,
         min_confidence=args.min_confidence,
-        name_script=args.name_script,
         input_device=args.input_device,
         text_mode=args.text,
         post=post,
         dry_run=args.dry_run,
-        strict_entity=args.strict_entity,
         verbose=args.verbose,
         log_path=Path(args.log_file),
         transcript_mode=args.transcript_mode,

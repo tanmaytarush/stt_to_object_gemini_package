@@ -1,123 +1,121 @@
-# Example spoken turns for voice_logging.
-# Use with:  python -m voice_logging --contractor-id 1 --text
-# One line = one turn. A blank line clears the record (in --text mode).
-# Lines starting with # are notes — do not paste those into --text.
+# Example spoken turns for voice_logging (Items section only).
+#
+#   cd scripts
+#   python -m voice_logging --contractor-id 1 --client-id 12 --text
+#
+# Paste ONE line at a time. A blank line clears the list.
+# Lines starting with # are notes — do not paste those.
+#
+# Voice fills item / qty / uom. Dealer, client, order type, amount and dates
+# come from the screen. If they are said in the same breath, ignore them.
+#
+# Expected after the first Hinglish one-shot (with --client-id 12):
+#   orderItems: 10 bag cement, 5 kg Fevicol SH, 2 tin Dr. Fixit
 
 # ---------------------------------------------------------------------------
 # ENGLISH
 # ---------------------------------------------------------------------------
 
-# Client — one shot (name + phone + labour only)
-Add client Ramesh Kumar, phone 9876543210, labour only.
+# One shot — three complete rows
+Ten bags cement, five kg Fevicol SH, two tins Dr. Fixit.
 
-# Client — one shot (material and labour + amount)
-Add a new client Priya Sharma, number 9123456780, material and labour, total two lakh fifty thousand.
+# One row per turn — they append
+twenty bori TMT
+three packets M-Seal
+one roll Roff Rainbow Tile Mate
 
-# Client — field by field (paste one line, wait, then the next)
-New client Suresh Patil
-phone nine eight seven six five four three two one zero
-labour only
-total amount seventy five thousand
+# Correction — resend the whole list, not just the fixed row
+no, eight bags cement and five kg Fevicol SH
 
-# Client — correction
-no, not labour only, material and labour both
-
-# Dealer — one shot (phone optional)
-Add dealer Sharma Traders, phone 9988776655
-
-# Dealer — name only
-Add supplier Gupta Hardware and Sons
+# Same breath as a dealer / price — still only the items
+Need 15 bags cement and 2 litre Fevicol Marine from Sharma Traders, total twelve thousand.
 
 # ---------------------------------------------------------------------------
-# HINDI  (as Gemini live often returns it — Devanagari)
+# HINGLISH  (Latin script — what SMART STT often returns)
 # ---------------------------------------------------------------------------
 
-# Client — one shot
-नया क्लाइंट रमेश कुमार ऐड करें जिसका फोन नंबर है 9876543210 सिर्फ लेबर।
+# One shot
+das bag cement, paanch kilo Fevicol SH, do tin Dr. Fixit
 
-# Client — one shot with amount
-प्रिया शर्मा को क्लाइंट बनाओ, नंबर 9123456780, माल और मजदूरी दोनों, टोटल डेढ़ लाख।
+# Append
+bees bori sariya
+teen packet M-Seal
+ek peti Fevikwik
+chaar nag plywood
 
-# Client — field by field
-नया क्लाइंट सुरेश पाटिल
-फोन नौ आठ सात छह पांच चार तीन दो एक शून्य
-सिर्फ मजदूरी
-पचहत्तर हज़ार का काम
+# Correction
+nahi, aath bag cement aur paanch kilo Fevicol SH
 
-# Client — correction
-नहीं, सिर्फ लेबर नहीं, माल और मजदूरी दोनों
+# Items plus chatter that must NOT become rows
+das bag cement Sharma Traders se le aana, total bara hazaar
+paanch kilo Fevicol SH client Ramesh ke site pe
 
-# Dealer
-डीलर शर्मा ट्रेडर्स ऐड करो, फोन 9988776655
-गुप्ता हार्डवेयर एंड संस सप्लायर है
+# Incomplete — drop the row, keep a note
+thoda cement bhi laao
+paanch cement
+dedh bag cement
 
-# Hinglish (Latin script — also common from STT)
-naya client Ramesh Kumar
-phone nau aath saat chhe paanch chaar teen do ek shunya
-sirf labour
-maal aur mazdoori dono, total do lakh pachaas hazaar
-dealer Sharma Traders
-
-# ---------------------------------------------------------------------------
-# KANNADA
-# ---------------------------------------------------------------------------
-
-# Client — one shot
-ಹೊಸ ಗ್ರಾಹಕ ರಮೇಶ್ ಕುಮಾರ್ ಆ್ಯಡ್ ಮಾಡಿ, ಫೋನ್ 9876543210, ಕೂಲಿ ಮಾತ್ರ.
-
-# Client — one shot with amount
-ಪ್ರಿಯಾ ಶರ್ಮಾ ಅವರನ್ನು ಕ್ಲೈಂಟ್ ಮಾಡಿ, ನಂಬರ್ 9123456780, ಸಾಮಗ್ರಿ ಜೊತೆ ಕೆಲಸ, ಒಟ್ಟು ಒಂದೂವರೆ ಲಕ್ಷ.
-
-# Client — field by field
-ಹೊಸ ಗ್ರಾಹಕ ಸುರೇಶ್ ಪಾಟೀಲ್
-ಫೋನ್ ಒಂಬತ್ತು ಎಂಟು ಏಳು ಆರು ಐದು ನಾಲ್ಕು ಮೂರು ಎರಡು ಒಂದು ಸೊನ್ನೆ
-ಕೂಲಿ ಮಾತ್ರ
-ಎಪ್ಪತ್ತೈದು ಸಾವಿರದ ಕೆಲಸ
-
-# Client — correction
-ಇಲ್ಲ, ಕೂಲಿ ಮಾತ್ರ ಅಲ್ಲ, ಸಾಮಗ್ರಿ ಸಹಿತ
-
-# Dealer
-ಡೀಲರ್ ಶರ್ಮಾ ಟ್ರೇಡರ್ಸ್ ಆ್ಯಡ್ ಮಾಡಿ, ಫೋನ್ 9988776655
-ಗುಪ್ತಾ ಹಾರ್ಡ್‌ವೇರ್ ಅಂಡ್ ಸನ್ಸ್ ಅಂಗಡಿ
-
-# Kannada in Latin script (if STT transliterates).
-# Paste ONE line at a time. The phone line is spoken digits, not "missing".
-#   ombattu=9 entu=8 elu=7 aaru=6 aidu=5 naalku=4 mooru=3 eradu=2 ondu=1 sonne=0
-#   → 9876543210
-hosa graahaka Ramesh Kumar
-phone ombattu entu elu aaru aidu naalku mooru eradu ondu sonne
-kooli matra
-# next line CORRECTS labour-only → material+labour, amount 5000 (aidu savira)
-samagri jothe, savira aidu
-dealer Sharma Traders
+# No items at all
+Sharma Traders ko bhej dena
+client Ramesh Kumar ka order hai
+total bara hazaar rupaye
+kal subah chahiye
+haan theek hai
 
 # ---------------------------------------------------------------------------
-# REGRESSION — the first live Kannada run
+# HINDI  (Devanagari — also common from live STT)
 # ---------------------------------------------------------------------------
-# Everything said in one breath. This turn used to come back as a bare
-# "no record in that" and lose all five facts, because it holds two entities
-# (client Ramesh Kumar + dealer Dermot Traders) AND two contradictory project
-# types (kooli matra = labour only, samagri jothe = with material).
-#
-# It must now yield:
-#   captured [CLIENT] name='Ramesh Kumar'
-#   ! also heard DEALER Dermot Traders — not captured, say it again on its own
-#   note: ... projectType stated both ways ...
-#   still need: phoneNumber, projectType
-# The phone is 8 digits and is correctly dropped rather than padded.
-Hosa grahaka Ramesh Kumar phone number 92665243. Kooli matra samagri jothe savira aidu dealer Dermot Traders.
+
+दस बैग सीमेंट, पांच किलो फेविकोल एसएच, दो टिन डॉ फिक्सीट।
+बीस बोरी सरिया
+तीन पैकेट एम सील
+नहीं, आठ बैग सीमेंट और पांच किलो फेविकोल।
+थोड़ा पुट्टी भी लाओ
+शर्मा ट्रेडर्स को भेज देना, बारह हज़ार का बिल है।
 
 # ---------------------------------------------------------------------------
-# EXPECTED DTO (after a complete client turn)
+# GUJARATI
 # ---------------------------------------------------------------------------
-# {
-#   "contractorId": 1,
-#   "clientName": "Ramesh Kumar",
-#   "phoneNumber": "9876543210",
-#   "projectType": "LABOUR_ONLY"
-# }
-#
-# projectType:
-#   labour only / sirf labour / सिर्फ लेबर / कूಲಿ ಮಾತ್ರ     → LABOUR_ONLY
-#   material and labour / maal aur mazdoori / माल और मजदूरी / ಸಾಮಗ್ರಿ ಜೊತೆ → MATERIAL_AND_LABOUR
+
+દસ બેગ સિમેન્ટ, પાંચ કિલો ફેવિકોલ એસએચ
+બે ટીન ડૉ ફિક્સિટ
+ના, આઠ બેગ સિમેન્ટ
+
+das bag cement ane panch kilo Fevicol SH
+be tin Dr. Fixit, Gupta Hardware thi
+nathi, aath bag cement
+
+# ---------------------------------------------------------------------------
+# MARATHI
+# ---------------------------------------------------------------------------
+
+दहा बॅग सिमेंट, पाच किलो फेविकोल
+दोन टीन डॉ फिक्सीट
+नाही, आठ बॅग सिमेंट
+
+daha bag cement ani paach kilo Fevicol SH
+don tin Dr. Fixit
+nahi, aath bag cement
+
+# ---------------------------------------------------------------------------
+# KANNADA  (native script + Latin, as STT often transliterates)
+# ---------------------------------------------------------------------------
+
+ಹತ್ತು ಬ್ಯಾಗ್ ಸಿಮೆಂಟ್, ಐದು ಕಿಲೋ ಫೆವಿಕಾಲ್, ಎರಡು ಟಿನ್ ಡಾ ಫಿಕ್ಸಿಟ್
+ಇಲ್ಲ, ಎಂಟು ಬ್ಯಾಗ್ ಸಿಮೆಂಟ್
+
+# Latin: hattu=10 aidu=5 eradu=2 mooru=3 naalku=4 aaru=6 elu=7 entu=8 ombattu=9
+hattu bag cement, aidu kilo Fevicol SH
+eradu tin Dr. Fixit
+mooru packet M-Seal
+illa, entu bag cement
+savira aidu rupayi total — idanna bidu
+
+# ---------------------------------------------------------------------------
+# MIXED / MESSY  (one breath: items + dealer + amount)
+# ---------------------------------------------------------------------------
+# Must yield only the material rows. Names, shops and money stay on the screen.
+
+das bag cement aur paanch kilo Fevicol, dealer Sharma Traders, phone nau aath saat
+Hosa samagri hattu bag cement, graahaka Ramesh, savira aidu
+maal laao: 10 bag cement, 5 kg Fevicol SH, 2 tin Dr Fixit, kal subah chahiye

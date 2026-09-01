@@ -12,8 +12,8 @@ from . import config
 from .audio import MicStream, list_devices
 from .exceptions import MicrophoneError
 from .extractor import Extractor, TurnResult
-from .schemas import ClientDto, ValidationFailure
-from .sink import StarshipClient, curl_for, describe_match, render_body
+from .schemas import ValidationFailure
+from .sink import StarshipClient, curl_for, render_body
 from .transcriber import Final, Interim, Notice, Transcriber
 
 # --- console ----------------------------------------------------------------
@@ -77,16 +77,18 @@ class Trace:
 
 # --- record presentation ----------------------------------------------------
 
-_FIELD_LABELS = {
-    "name": "name",
-    "phone_number": "phoneNumber",
-    "project_type": "projectType",
-    "total_amount": "totalAmount",
-}
+def _row_text(row: object) -> str:
+    """One item as the order screen shows it: item · qty · uom."""
+    if isinstance(row, dict):
+        name = row.get("itemName") or row.get("item_name")
+        return f"{row.get('quantity')} {row.get('uom')}  {name}"
+    if hasattr(row, "item_name"):
+        return f"{row.quantity} {row.uom}  {row.item_name}"
+    return str(row)
 
 
 def show_progress(result: TurnResult, extractor: Extractor) -> None:
-    """Print what the turn changed and what the record still needs."""
+    """Print the rows this turn added and the list as it now stands."""
     for warning in result.warnings:
         say(f"  {YELLOW('!')} {warning}")
 
@@ -100,34 +102,31 @@ def show_progress(result: TurnResult, extractor: Extractor) -> None:
 
     # A gated turn is not an empty one. Show what was heard and thrown away, or
     # the speaker has no idea which part to repeat.
-    if result.ignored_fields:
-        parts = [f"{_FIELD_LABELS.get(k, k)}={v!r}" for k, v in result.ignored_fields.items()]
-        say(f"  {DIM('heard but not kept: ' + '  '.join(parts))}")
-
-    # A second entity in the same turn is never captured, so it must always be
-    # said out loud — otherwise the speaker believes it was recorded.
-    if result.also_heard:
-        say(f"  {YELLOW('!')} also heard {result.also_heard} — not captured, "
-            f"say it again on its own")
+    for row in result.ignored_fields.get("items") or []:
+        say(f"  {DIM('heard but not kept: ' + _row_text(row))}")
 
     if extraction.entity == "NONE":
         # The note comes BEFORE the return: a bail that explains nothing is how
         # a turn full of real content used to vanish silently.
         if extraction.notes:
-            say(f"  {DIM('· no record: ' + extraction.notes)}")
+            say(f"  {DIM('· no items: ' + extraction.notes)}")
         else:
-            say(f"  {DIM('· no record in that — still listening')}")
+            say(f"  {DIM('· no items in that — still listening')}")
         return
 
-    if not result.changed and not result.dto:
-        if extraction.notes:
-            say(f"  {DIM('note: ' + extraction.notes)}")
-        return
-
-    if result.changed:
-        parts = [f"{_FIELD_LABELS.get(k, k)}={v!r}" for k, v in result.changed.items()]
-        marker = "corrected" if extraction.is_correction else "captured"
-        say(f"  {CYAN(marker)} [{extraction.entity}] " + "  ".join(parts))
+    added = result.changed.get("items") or []
+    if added:
+        marker = "replaced with" if extraction.is_correction else "added"
+        say(f"  {CYAN(marker)}")
+        for row in added:
+            say(f"      {_row_text(row)}")
+        total = len(extractor.fields.get("items") or [])
+        say(f"  {DIM(f'{total} item(s) in the list')}")
+    elif not result.warnings:
+        # Classified as ITEMS but nothing usable came out of it — often a turn
+        # that was really about the dealer or the price. Say so, or the speaker
+        # is left thinking it landed.
+        say(f"  {DIM('· no items in that — still listening')}")
 
     if extraction.notes:
         say(f"  {DIM('note: ' + extraction.notes)}")
@@ -142,10 +141,10 @@ def show_progress(result: TurnResult, extractor: Extractor) -> None:
 
 
 def show_ready(settings: config.Settings, dto) -> None:
-    """Print a complete, valid record as the exact body that would be POSTed."""
+    """Print a complete, valid order as the exact body that would be POSTed."""
     if dto is None:
         return
-    endpoint = settings.client_url if isinstance(dto, ClientDto) else settings.dealer_url
+    endpoint = settings.order_url
     say()
     say(BOLD(f"  ── {dto.entity_label} ready ── POST {endpoint}"))
     for line in render_body(dto).splitlines():
@@ -158,51 +157,61 @@ async def ask(prompt: str) -> str:
     return (await asyncio.to_thread(input, prompt)).strip()
 
 
-async def edit_record(extractor: Extractor) -> None:
-    """Type a value for one field. The fastest fix when a field keeps mis-hearing."""
-    editable = ["name", "phone_number"]
-    if extractor.entity == "CLIENT":
-        editable += ["project_type", "total_amount"]
+def _parse_row(raw: str) -> Optional[dict]:
+    """`cement, 10, bag` -> one order item. None if it is not three parts."""
+    bits = [bit.strip() for bit in raw.split(",")]
+    if len(bits) != 3:
+        return None
+    name, qty_raw, uom = bits
+    try:
+        qty = int(qty_raw)
+    except ValueError:
+        return None
+    if not name or qty <= 0 or not uom:
+        return None
+    return {"itemName": name, "quantity": qty, "uom": uom}
 
-    say("  fields: " + ", ".join(f"{i + 1}) {_FIELD_LABELS[f]}" for i, f in enumerate(editable)))
-    choice = await ask("  edit which? (number, or blank to cancel) ")
-    if not choice.isdigit() or not 1 <= int(choice) <= len(editable):
+
+async def edit_record(extractor: Extractor) -> None:
+    """Fix one item row by hand — the fastest cure for a mis-heard material."""
+    rows = list(extractor.fields.get("items") or [])
+    for i, row in enumerate(rows):
+        say(f"  {i + 1}) {_row_text(row)}")
+
+    choice = await ask("  row number to fix, 'a' to add one, blank to cancel > ")
+    if choice.lower() == "a":
+        raw = await ask("  new row (item, qty, uom) = ")
+        row = _parse_row(raw)
+        if row is None:
+            say(f"  {RED('expected item, qty, uom')} — nothing added")
+            return
+        extractor.set_field("items", rows + [row])
+        say(f"  {GREEN('added')} {_row_text(row)}")
+        return
+
+    if not choice.isdigit() or not 1 <= int(choice) <= len(rows):
         say(f"  {DIM('cancelled')}")
         return
 
-    key = editable[int(choice) - 1]
-    current = extractor.fields.get(key)
-    hint = {
-        "project_type": " (MATERIAL_AND_LABOUR | LABOUR_ONLY)",
-        "phone_number": " (10 digits)",
-        "total_amount": " (rupees)",
-    }.get(key, "")
-    raw = await ask(f"  {_FIELD_LABELS[key]}{hint} [{current if current is not None else ''}] = ")
-
+    index = int(choice) - 1
+    raw = await ask(f"  row {choice} (item, qty, uom · '-' deletes) "
+                    f"[{_row_text(rows[index])}] = ")
     if raw == "":
         say(f"  {DIM('unchanged')}")
         return
     if raw == "-":
-        extractor.set_field(key, None)
-        say(f"  {DIM(_FIELD_LABELS[key] + ' cleared')}")
+        removed = rows.pop(index)
+        extractor.set_field("items", rows or None)
+        say(f"  {DIM('deleted ' + _row_text(removed))}")
         return
 
-    if key == "total_amount":
-        try:
-            extractor.set_field(key, float(raw.replace(",", "")))
-        except ValueError:
-            say(f"  {RED('not a number')} — unchanged")
-            return
-    elif key == "project_type":
-        value = raw.strip().upper()
-        if value not in ("MATERIAL_AND_LABOUR", "LABOUR_ONLY"):
-            say(f"  {RED('must be MATERIAL_AND_LABOUR or LABOUR_ONLY')} — unchanged")
-            return
-        extractor.set_field(key, value)
-    else:
-        extractor.set_field(key, raw)
-
-    say(f"  {GREEN('set')} {_FIELD_LABELS[key]} = {extractor.fields.get(key)!r}")
+    row = _parse_row(raw)
+    if row is None:
+        say(f"  {RED('expected item, qty, uom')} — unchanged")
+        return
+    rows[index] = row
+    extractor.set_field("items", rows)
+    say(f"  {GREEN('set')} {_row_text(row)}")
 
 
 async def confirm_and_maybe_post(
@@ -224,22 +233,10 @@ async def confirm_and_maybe_post(
 
         show_ready(settings, dto)
 
-        if settings.post and api is not None:
-            wanted = (dto.clientName if isinstance(dto, ClientDto) else dto.dealerName) or ""
-            matches, probe_error = await api.find_similar(dto)
-            if probe_error:
-                say(f"  {DIM(probe_error)}")
-            elif matches:
-                say(f"  {YELLOW(f'! {len(matches)} existing record(s) with a similar name:')}")
-                for match in matches[:5]:
-                    say(f"      {describe_match(match, wanted)}")
-                if len(matches) > 5:
-                    say(f"      {DIM(f'… and {len(matches) - 5} more')}")
-
         if settings.post:
-            options = "[y] post  [e] edit  [k] keep refining  [d] discard  [q] quit"
+            options = "[y] post  [e] edit an item  [k] keep adding  [d] discard  [q] quit"
         else:
-            options = "[Enter] next record  [e] edit  [k] keep refining  [q] quit"
+            options = "[Enter] next order  [e] edit an item  [k] keep adding  [q] quit"
         choice = (await ask(f"  {options} > ")).lower()
 
         if choice == "e":
@@ -248,17 +245,17 @@ async def confirm_and_maybe_post(
         if choice == "q":
             raise KeyboardInterrupt
         if choice == "k":
-            say(f"  {DIM('record left open — keep speaking to amend it')}")
+            say(f"  {DIM('list left open — keep speaking to add items')}")
             return
         if choice == "d" or not settings.post:
-            # Outside --post there is nothing else to do with a finished record,
+            # Outside --post there is nothing else to do with a finished order,
             # so Enter clears it and the next utterance starts clean. Without
-            # this, a second client's fields would merge into the first.
+            # this, the next order's items would append to this one.
             extractor.reset_record()
-            say(f"  {DIM('cleared — ready for the next record')}")
+            say(f"  {DIM('cleared — ready for the next order')}")
             return
         if choice != "y":
-            say(f"  {DIM('record left open — keep speaking to amend it')}")
+            say(f"  {DIM('list left open — keep speaking to add items')}")
             return
 
         if settings.dry_run:
@@ -274,7 +271,7 @@ async def confirm_and_maybe_post(
         trace.write("post", status=code, body=dto.request_body(), response=body)
         if code is None:
             say(f"  {RED('x')} {body}")
-            say(f"  {DIM('record kept — press y to retry')}")
+            say(f"  {DIM('list kept — press y to retry')}")
             continue
         colorize = GREEN if 200 <= code < 300 else RED
         say(f"  {colorize(f'HTTP {code}')}")
@@ -282,9 +279,9 @@ async def confirm_and_maybe_post(
             say("  " + DIM(line))
         if 200 <= code < 300:
             extractor.reset_record()
-            say(f"  {DIM('ready for the next record')}")
+            say(f"  {DIM('ready for the next order')}")
             return
-        say(f"  {DIM('record kept — [e] to fix a field, then y to retry')}")
+        say(f"  {DIM('list kept — [e] to fix an item, then y to retry')}")
 
 
 # --- main loop --------------------------------------------------------------
@@ -306,8 +303,14 @@ def banner(settings: config.Settings) -> None:
         say(DIM(f"  stt        {config.STT_MODEL} ({settings.transcript_mode}, {languages})"))
     say(DIM(f"  extract    {settings.extract_model}"))
     say(DIM(f"  contractor {settings.contractor_id}   user {settings.user_id}   {mode}"))
+    screen = [settings.order_type]
+    if settings.client_id:
+        screen.append(f"client {settings.client_id}")
+    if settings.dealer_id:
+        screen.append(f"dealer {settings.dealer_id}")
+    say(DIM(f"  screen     {' · '.join(screen)}   (voice fills items only)"))
     if settings.text_mode:
-        say(DIM("  one transcript per line · blank line clears the record · Ctrl+D to stop"))
+        say(DIM("  one transcript per line · blank line clears the list · Ctrl+D to stop"))
     else:
         say(DIM(f"  turn ends after {settings.silence_seconds:g}s of quiet · Ctrl+C to stop"))
     say()
@@ -339,8 +342,8 @@ async def handle_turn(
     if settings.text_mode and not settings.post:
         # In --text mode the confirm prompt would read from the same stdin the
         # transcripts come from, so a piped script would feed its next line to
-        # the prompt. There is already an explicit record boundary here (a blank
-        # line), so just show the body and leave the record open for follow-ups.
+        # the prompt. There is already an explicit order boundary here (a blank
+        # line), so just show the body and leave the list open for follow-ups.
         show_ready(settings, extractor.current_dto())
         return
 
@@ -365,7 +368,7 @@ async def run_text_mode(
             return
         if not line:
             extractor.reset_record()
-            say(f"  {DIM('cleared — ready for the next record')}")
+            say(f"  {DIM('cleared — ready for the next order')}")
             continue
         extractor.add_final(line)
         trace.write("final", text=line)

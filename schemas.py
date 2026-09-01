@@ -1,15 +1,13 @@
-"""Two schema layers.
+"""Two schema layers for material-order logging.
 
-Layer 1 (`Extraction`) is what the LLM fills in: loose, flat, everything
-optional. Layer 2 (`ClientDto` / `DealerDto`) is what actually goes on the
-wire, constructed by Python with contractorId injected. The model never
-authors a request body — it only reports what it heard.
+Layer 1 (`Extraction`) is what the LLM fills in from speech, and it covers the
+Items section of the New Order screen and nothing else: itemName, quantity, uom.
+Layer 2 (`MaterialOrderDto`) is the POST /starship/v1/material-order body.
+contractorId, clientId, dealerId and orderType come from the screen the user is
+already on — never from speech.
 
-The Layer 2 validators mirror Validator/ClientValidator.go and
-Validator/DealerValidator.go one-for-one, including their exact message text,
-so a local rejection tells you precisely what the server would have said.
-Note that Go's `len()` counts BYTES, so the length checks here encode to UTF-8
-first: 255 bytes is ~85 Devanagari characters, not 255.
+Validators mirror Validator/MaterialOrderValidator.go, including message text.
+Go's `len()` counts BYTES.
 """
 
 from __future__ import annotations
@@ -18,218 +16,167 @@ from typing import ClassVar, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-PROJECT_TYPE_MATERIAL_AND_LABOUR = "MATERIAL_AND_LABOUR"
-PROJECT_TYPE_LABOUR_ONLY = "LABOUR_ONLY"
-PROJECT_TYPES = (PROJECT_TYPE_MATERIAL_AND_LABOUR, PROJECT_TYPE_LABOUR_ONLY)
+ORDER_TYPE_MAT_ORDER = "MAT_ORDER"
+ORDER_TYPE_MAT_LIST = "MAT_LIST"
+ORDER_TYPES = (ORDER_TYPE_MAT_ORDER, ORDER_TYPE_MAT_LIST)
 
-MAX_NAME_BYTES = 255
-MAX_PHONE_BYTES = 20
+MAX_ITEM_NAME_BYTES = 255
+MAX_UOM_BYTES = 30
 
 
 class ValidationFailure(Exception):
     """Mirrors a rejection the Go validator would have produced."""
 
 
-# --- Layer 1: what the model fills ------------------------------------------
+class SpokenItem(BaseModel):
+    """One line item heard in a turn. Nested objects are allowed; dict/Any are not."""
+
+    item_name: str = Field(description="Material name, e.g. Fevicol SH, cement.")
+    quantity: int = Field(description="Whole units only, greater than 0.")
+    uom: str = Field(
+        description="Unit of measure as spoken: bag, bori, tin, kg, litre, piece, …"
+    )
 
 
 class Extraction(BaseModel):
-    """The LLM's report of one spoken turn.
+    """The LLM's report of one spoken turn. Item rows only, nothing else."""
 
-    Kept deliberately flat and free of dict/Any fields: google-genai's
-    client-side schema validation rejects `additionalProperties`, which is what
-    those types generate. `Optional[...]` renders as `anyOf`, which is fine.
-    """
-
-    entity: Literal["CLIENT", "DEALER", "NONE"] = Field(
-        description="CLIENT if the speaker is describing a customer/site owner, "
-                    "DEALER if a material supplier/shop, NONE if neither is "
-                    "clearly being described."
+    entity: Literal["ITEMS", "NONE"] = Field(
+        description="ITEMS if the speaker named any material. "
+                    "NONE for chatter with no items."
     )
-    # No ge/le here on purpose: numeric bounds are one of the JSON Schema
-    # keywords google-genai has historically choked on client-side. The gate is
-    # applied in Python instead (extractor clamps to 0..1).
     confidence: float = Field(
-        description="How confident you are, from 0.0 to 1.0, in the entity "
-                    "classification and the fields you filled. Below 0.5 if you "
-                    "are guessing.",
+        description="0.0 to 1.0 for the item rows you filled."
     )
-    name: Optional[str] = Field(
-        default=None, description="The client's or dealer's name, or null if not stated."
-    )
-    phone_number: Optional[str] = Field(
-        default=None,
-        description="Exactly 10 digits, no spaces, no +91, no leading 0. "
-                    "Null if not stated or not recoverable as 10 digits.",
-    )
-    project_type: Optional[Literal["MATERIAL_AND_LABOUR", "LABOUR_ONLY"]] = Field(
-        default=None,
-        description="Only if explicitly stated. Never inferred. Clients only.",
-    )
-    total_amount: Optional[float] = Field(
-        default=None,
-        description="Total project value in whole rupees. Null if not stated.",
+    items: list[SpokenItem] = Field(
+        default_factory=list,
+        description="Line items heard THIS turn. Empty if none. Do not repeat "
+                    "items already in the in-progress list unless correcting.",
     )
     is_correction: bool = Field(
         default=False,
-        description="True if the speaker is correcting something said earlier "
-                    "('no, not Ramesh — Rajesh', 'sorry, labour only').",
-    )
-    also_heard: Optional[str] = Field(
-        default=None,
-        description="If the turn described a SECOND client or dealer beyond the "
-                    "one you extracted, name it here, e.g. "
-                    "'DEALER Dermot Traders'. Null when the turn covered one "
-                    "record. Never merge two entities into one record.",
+        description="True if this turn replaces the item list rather than "
+                    "adding to it.",
     )
     notes: Optional[str] = Field(
         default=None,
-        description="One short line on anything ambiguous or dropped — including "
-                    "why you returned NONE, when the turn did contain a name or "
-                    "digits. Null only when the turn was clean and unambiguous.",
+        description="One short line on ambiguity, e.g. a missing uom. "
+                    "Null if clean.",
     )
 
     def filled_fields(self) -> dict[str, object]:
-        """The non-null payload fields, for merging into pending state."""
-        out: dict[str, object] = {}
-        for key in ("name", "phone_number", "project_type", "total_amount"):
-            value = getattr(self, key)
-            if isinstance(value, str):
-                value = value.strip()
-                if not value:
-                    continue
-            if value is not None:
-                out[key] = value
-        return out
+        return {"items": list(self.items)} if self.items else {}
 
 
-# --- Layer 2: what goes on the wire -----------------------------------------
+class MaterialOrderDto(BaseModel):
+    """Mirrors RequestDtos.CreateMaterialOrderRequestDto.
 
-
-def _check_name(value: Optional[str], field_name: str) -> str:
-    trimmed = (value or "").strip()
-    if not trimmed:
-        if field_name == "clientName":
-            raise ValidationFailure("clientName is required and cannot be empty")
-        raise ValidationFailure("dealerName is required")
-    if len(trimmed.encode("utf-8")) > MAX_NAME_BYTES:
-        raise ValidationFailure(f"{field_name} must not exceed 255 characters")
-    return trimmed
-
-
-class ClientDto(BaseModel):
-    """Mirrors RequestDtos.CreateClientRequestDto."""
+    Only `orderItems` is ever filled from speech. `amount` and `itemSummary`
+    exist because the Go DTO has them, and stay at their defaults here.
+    """
 
     contractorId: int
-    clientName: Optional[str] = None
-    phoneNumber: Optional[str] = None
-    projectType: Optional[str] = None
-    totalAmount: Optional[float] = None
+    dealerId: Optional[int] = None
+    clientId: Optional[int] = None
+    orderType: Optional[str] = None
+    amount: float = 0.0
+    itemSummary: Optional[str] = None
+    orderItems: list[dict] = Field(default_factory=list)
 
-    entity_label: ClassVar[str] = "CLIENT"
+    entity_label: ClassVar[str] = "MATERIAL_ORDER"
 
     def missing_required(self) -> list[str]:
         missing = []
-        if not (self.clientName or "").strip():
-            missing.append("clientName")
-        if not (self.phoneNumber or "").strip():
-            missing.append("phoneNumber")
-        if not self.projectType:
-            missing.append("projectType")
+        if self.orderType not in ORDER_TYPES:
+            missing.append("orderType")
+        if not self.orderItems:
+            missing.append("orderItems")
+        else:
+            for i, item in enumerate(self.orderItems):
+                if not str(item.get("itemName") or "").strip():
+                    missing.append(f"orderItems[{i}].itemName")
+                if int(item.get("quantity") or 0) <= 0:
+                    missing.append(f"orderItems[{i}].quantity")
+                if not str(item.get("uom") or "").strip():
+                    missing.append(f"orderItems[{i}].uom")
         return missing
 
     def validate_for_api(self) -> None:
-        """Raise ValidationFailure with the same text Validator/ClientValidator.go uses."""
         if self.contractorId == 0:
             raise ValidationFailure("contractorId is required and must be greater than 0")
-        _check_name(self.clientName, "clientName")
-
-        phone = (self.phoneNumber or "").strip()
-        if not phone:
-            raise ValidationFailure("phoneNumber is required and cannot be empty")
-        if len(phone.encode("utf-8")) > MAX_PHONE_BYTES:
-            raise ValidationFailure("phoneNumber must not exceed 20 characters")
-
-        if self.projectType not in PROJECT_TYPES:
-            raise ValidationFailure(
-                "projectType must be one of: MATERIAL_AND_LABOUR, LABOUR_ONLY"
-            )
-        if self.totalAmount is not None and self.totalAmount < 0:
-            raise ValidationFailure("totalAmount must be non-negative")
-
-    def request_body(self) -> dict[str, object]:
-        """The exact JSON body for POST /starship/v1/client.
-
-        totalAmount is omitted rather than sent as null when absent — the Go
-        field is a *float64, so an omitted key and a null are equivalent, and
-        omitting keeps the printed body honest about what was actually heard.
-        """
-        body: dict[str, object] = {
-            "contractorId": self.contractorId,
-            "clientName": (self.clientName or "").strip(),
-            "phoneNumber": (self.phoneNumber or "").strip(),
-            "projectType": self.projectType,
-        }
-        if self.totalAmount is not None:
-            body["totalAmount"] = self.totalAmount
-        return body
-
-
-class DealerDto(BaseModel):
-    """Mirrors RequestDtos.CreateDealerRequestDto. No projectType, phone optional."""
-
-    contractorId: int
-    dealerName: Optional[str] = None
-    phoneNumber: Optional[str] = None
-
-    entity_label: ClassVar[str] = "DEALER"
-
-    def missing_required(self) -> list[str]:
-        return [] if (self.dealerName or "").strip() else ["dealerName"]
-
-    def validate_for_api(self) -> None:
-        """Mirrors Validator/DealerValidator.go ValidateCreateDealer."""
-        if self.contractorId == 0:
-            raise ValidationFailure("contractorId is required and must be greater than 0")
-        _check_name(self.dealerName, "dealerName")
-        # Go checks the raw pointer value here without trimming first.
-        if self.phoneNumber is not None and len(self.phoneNumber.encode("utf-8")) > MAX_PHONE_BYTES:
-            raise ValidationFailure("phoneNumber must not exceed 20 characters")
+        if self.orderType not in ORDER_TYPES:
+            raise ValidationFailure("orderType must be one of: MAT_ORDER, MAT_LIST")
+        if not self.orderItems:
+            raise ValidationFailure("either orderItems or orderUrls is required")
+        if self.amount < 0:
+            raise ValidationFailure("amount must be non-negative")
+        for i, item in enumerate(self.orderItems):
+            name = str(item.get("itemName") or "").strip()
+            if not name:
+                raise ValidationFailure(f"orderItems[{i}].itemName is required")
+            if len(name.encode("utf-8")) > MAX_ITEM_NAME_BYTES:
+                raise ValidationFailure(f"orderItems[{i}].itemName must not exceed 255 characters")
+            qty = int(item.get("quantity") or 0)
+            if qty <= 0:
+                raise ValidationFailure(
+                    f"orderItems[{i}].quantity is required and must be greater than 0"
+                )
+            uom = str(item.get("uom") or "").strip()
+            if not uom:
+                raise ValidationFailure(f"orderItems[{i}].uom is required")
+            if len(uom.encode("utf-8")) > MAX_UOM_BYTES:
+                raise ValidationFailure(f"orderItems[{i}].uom must not exceed 30 characters")
 
     def request_body(self) -> dict[str, object]:
         body: dict[str, object] = {
             "contractorId": self.contractorId,
-            "dealerName": (self.dealerName or "").strip(),
+            "orderType": self.orderType,
+            "orderUrls": [],
+            "amount": self.amount,
+            "orderItems": [
+                {
+                    "itemName": str(item["itemName"]).strip(),
+                    "quantity": int(item["quantity"]),
+                    "uom": str(item["uom"]).strip(),
+                }
+                for item in self.orderItems
+            ],
         }
-        phone = (self.phoneNumber or "").strip()
-        if phone:
-            body["phoneNumber"] = phone
+        if self.clientId:
+            body["clientId"] = self.clientId
+        if self.dealerId:
+            body["dealerId"] = self.dealerId
+        if self.itemSummary:
+            body["itemSummary"] = self.itemSummary
         return body
 
 
-def build_dto(entity: str, contractor_id: int, fields: dict[str, object]):
-    """Project the merged extraction state onto the DTO for `entity`.
-
-    Fields that do not exist on the target DTO (projectType and totalAmount on a
-    dealer) are dropped here rather than silently sent.
-    """
-    if entity == "CLIENT":
-        return ClientDto(
-            contractorId=contractor_id,
-            clientName=fields.get("name"),
-            phoneNumber=fields.get("phone_number"),
-            projectType=fields.get("project_type"),
-            totalAmount=fields.get("total_amount"),
-        )
-    if entity == "DEALER":
-        return DealerDto(
-            contractorId=contractor_id,
-            dealerName=fields.get("name"),
-            phoneNumber=fields.get("phone_number"),
-        )
-    raise ValueError(f"no DTO for entity {entity!r}")
+def _normalize_item(item: SpokenItem | dict) -> Optional[dict]:
+    if isinstance(item, SpokenItem):
+        name, qty, uom = item.item_name, item.quantity, item.uom
+    else:
+        name = item.get("item_name") or item.get("itemName")
+        qty = item.get("quantity")
+        uom = item.get("uom")
+    name = str(name or "").strip()
+    uom = str(uom or "").strip()
+    try:
+        qty_int = int(qty)
+    except (TypeError, ValueError):
+        return None
+    if not name or qty_int <= 0 or not uom:
+        return None
+    return {"itemName": name, "quantity": qty_int, "uom": uom}
 
 
-def dropped_for_dealer(fields: dict[str, object]) -> list[str]:
-    """Client-only fields present in state that a dealer DTO cannot carry."""
-    return [k for k in ("project_type", "total_amount") if k in fields]
+def build_dto(settings, fields: dict[str, object]) -> MaterialOrderDto:
+    """Wrap the spoken item rows in the surrounding screen's identifiers."""
+    normalized = [row for row in (_normalize_item(item)
+                                  for item in fields.get("items") or []) if row]
+    return MaterialOrderDto(
+        contractorId=settings.contractor_id,
+        clientId=settings.client_id,
+        dealerId=settings.dealer_id,
+        orderType=settings.order_type,
+        orderItems=normalized,
+    )

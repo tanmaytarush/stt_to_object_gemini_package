@@ -1,7 +1,21 @@
 # voice_logging
 
-Speak Hindi / Gujarati / Marathi / Kannada / Indian-English into the mic; get a
-validated `CreateClientRequestDto` or `CreateDealerRequestDto` out.
+Speak the **Items** section of the New Order screen — item, quantity, unit —
+in Hindi / Gujarati / Marathi / Kannada / Indian-English, and get a validated
+`CreateMaterialOrderRequestDto` out.
+
+Everything else on that screen is filled in by hand and passed in as a flag:
+
+| On the screen | Where it comes from |
+|---|---|
+| Dealer (optional) | `--dealer-id` |
+| Client (optional) | `--client-id` |
+| Order type | `--order-type` (default `MAT_ORDER`) |
+| **Items — item / qty / UOM** | **voice** |
+
+Speech never sets an id, a name, a phone number, a price or a date. If the
+model invents one it is dropped before it can reach the request body, and
+there is a test for that.
 
 Standalone Python. Nothing in the Go service depends on it, and by default it
 never writes anything — it prints the JSON body and stops there.
@@ -9,9 +23,9 @@ never writes anything — it prints the JSON body and stops there.
 ```
 mic ──16 kHz PCM──▶ gemini-3.5-transcribe-live ──finals──▶ turn buffer
                      SMART mode · custom vocab                 │ 1.5 s of quiet
-                     hi/gu/mr/kn/en-IN · auto-reconnect        ▼
-                                            gemini-3.6-flash + response_schema
-                                                               │ Extraction
+                                                               ▼
+                                       gemini-3.5-flash-lite + response_schema
+                                                               │ item rows
                                                                ▼
                                           merge ▶ validate ▶ print ▶ [--post]
 ```
@@ -46,150 +60,131 @@ python -m voice_logging.selftest
 # Which mic will it use?
 python -m voice_logging --list-devices
 
-# The main loop: talk, watch the JSON build up. Writes nothing.
-python -m voice_logging --contractor-id 1
+# Items for an order against a client. Writes nothing.
+python -m voice_logging --contractor-id 1 --client-id 12
+
+# Against a dealer instead, or both, or neither — same as the screen.
+python -m voice_logging --contractor-id 1 --dealer-id 5
 
 # Extraction only — type transcripts instead of speaking. No mic, no STT quota.
-python -m voice_logging --contractor-id 1 --text
+python -m voice_logging --contractor-id 1 --client-id 12 --text
 ```
 
-Once the transcription and extraction look right, wire it to the API:
+Once the transcription looks right, wire it to the API:
 
 ```bash
-# Prints the equivalent curl instead of sending.
-python -m voice_logging --contractor-id 1 --post --dry-run
-
-# Actually POSTs — after showing you the body and asking.
-python -m voice_logging --contractor-id 1 --user-id 1 --post
+python -m voice_logging --contractor-id 1 --client-id 12 --post --dry-run
+python -m voice_logging --contractor-id 1 --client-id 12 --user-id 1 --post
 ```
 
 ## How a session goes
 
-Speak one field at a time; they merge into one record.
+Rows accumulate. Each turn adds to the list; a correction replaces it.
 
 ```
-  · naya client Ramesh Kumar
-  captured [CLIENT] name='Ramesh Kumar'
-  still need: phoneNumber, projectType
+  screen     MAT_ORDER · client 12   (voice fills items only)
 
-  · phone nau aath saat chhe paanch chaar teen do ek shunya
-  captured [CLIENT] phoneNumber='9876543210'
-  still need: projectType
+  · das bag cement aur paanch kilo Fevicol SH
+  added
+      10 bag  cement
+      5 kg  Fevicol SH
+  2 item(s) in the list
 
-  · material aur labour dono, total do lakh pachaas hazaar
-  captured [CLIENT] projectType='MATERIAL_AND_LABOUR'  totalAmount=250000.0
+  · do tin Dr. Fixit, aur thoda putty
+  ! dropped 1 incomplete row(s) — a row needs a name, a quantity above 0, and a unit
+  added
+      2 tin  Dr. Fixit
+  3 item(s) in the list
+  note: putty had no quantity or unit
 
-  ── CLIENT ready ── POST http://localhost:8092/starship/v1/client
+  · nahi, aath bag cement aur paanch kilo Fevicol SH
+  replaced with
+      8 bag  cement
+      5 kg  Fevicol SH
+  2 item(s) in the list
+
+  ── MATERIAL_ORDER ready ── POST http://localhost:8092/starship/v1/material-order
   {
     "contractorId": 1,
-    "clientName": "Ramesh Kumar",
-    "phoneNumber": "9876543210",
-    "projectType": "MATERIAL_AND_LABOUR",
-    "totalAmount": 250000.0
+    "orderType": "MAT_ORDER",
+    "orderUrls": [],
+    "amount": 0.0,
+    "orderItems": [
+      {"itemName": "cement", "quantity": 8, "uom": "bag"},
+      {"itemName": "Fevicol SH", "quantity": 5, "uom": "kg"}
+    ],
+    "clientId": 12
   }
-  [Enter] next record  [e] edit  [k] keep refining  [q] quit >
+  [Enter] next order  [e] edit an item  [k] keep adding  [q] quit >
 ```
 
-Say `nahi, sirf labour` and only `projectType` changes — the rest of the record
-survives. Say `dealer Sharma Traders` and it switches to the dealer schema and
-drops the client-only fields.
+`e` lists the rows and lets you retype one, delete it with `-`, or add one —
+the fastest fix when a material name keeps coming through wrong.
 
-`e` lets you type a value for one field, which is the fastest fix when a name or
-a digit keeps coming through wrong.
+Voice never fills `orderUrls`; that is the screen's "Upload Item List" button.
+The Go validator requires items XOR urls, so the body always sends
+`"orderUrls": []`.
 
 ## Flags
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--contractor-id` | — | Required. Never inferred from speech. Env `CONTRACTOR_ID`. |
+| `--client-id` | — | Optional, like the screen's dropdown. Env `CLIENT_ID`. |
+| `--dealer-id` | — | Optional, like the screen's dropdown. Env `DEALER_ID`. |
+| `--order-type` | `MAT_ORDER` | `MAT_LIST` for a list that is not an order yet. Env `ORDER_TYPE`. |
 | `--user-id` | `1` | Sent as `X-USER-ID`; drives `created_by`. Env `STARSHIP_USER_ID`. |
 | `--base-url` | `http://localhost:8092` | Env `STARSHIP_BASE_URL`. |
-| `--languages` | auto-detect | One code locks that language. Two or more are a note only — see below. Env `STT_LANGUAGES`. |
+| `--languages` | auto-detect | One code locks that language. Two or more are a note only. Env `STT_LANGUAGES`. |
 | `--lock-languages` | off | Force the full `--languages` list through as hints anyway. |
 | `--silence` | `1.5` | Seconds of quiet that end a turn. |
-| `--min-confidence` | `0.55` | Extractions below this are dropped, but still printed so you can see what was heard. |
-| `--name-script` | `latin` | `native` keeps Devanagari/Gujarati as spoken. |
+| `--min-confidence` | `0.55` | Rows below this are dropped, but still printed so you can see what was heard. |
 | `--transcript-mode` | `SMART` | `VERBATIM` for a literal transcript with fillers. |
 | `--text` | off | Read transcripts from stdin. No mic, no STT. |
-| `--post` | off | Offer to POST each completed record. |
+| `--post` | off | Offer to POST each completed order. |
 | `--dry-run` | off | With `--post`, print curl instead of sending. |
-| `--strict-entity` | off | Refuse to switch CLIENT↔DEALER mid-record. |
 | `--verbose` | off | JSONL trace of every stage to `--log-file`. |
 | `--input-device` / `--list-devices` | — | Pick the mic explicitly. |
 
 ## Things worth knowing
 
+**A row is all three or nothing.** `itemName`, `quantity > 0` and `uom` — a
+material named with no quantity, or a quantity with no unit, is dropped with a
+note rather than guessed at. Half a row that looks captured is worse than a
+missing one, because the user only re-says what they can see is missing. Units
+are never converted, and fractional quantities (`dedh bag`, `sawa tin`) are
+dropped rather than rounded.
+
+**Corrections replace the whole list.** After a `nahi` / `illa` / `no, not
+that`, the model resends every row, not just the changed one. That is why
+`is_correction` swaps the list instead of appending.
+
 **Sessions rotate every ~9m30s.** The service caps a live transcription session
-at 10 minutes. The connection is replaced before that, and a half-built record
-survives the boundary. You will see `rotating session` and then `reconnected`.
-Audio arriving during the gap is dropped and the amount is reported, not
-swallowed.
+at 10 minutes. The connection is replaced before that, and a half-built item
+list survives the boundary.
 
-**The language is auto-detected, and sending no hint is deliberate.** By default
-nothing is sent to the ASR at all — `language_codes` is documented as *"hints
-about the languages present in the audio. If omitted or empty, defaults to
-automatic language detection"*, and the two fields that look like they should
-control this, `language_auto` and `language_hints`, are both deprecated in the
-SDK. Empty is the auto-detect setting.
-
-A multi-language hint list actively hurts: `hi-IN` and `kn-IN` together makes
-Hindi win and transcribes spoken Kannada into Devanagari. So `--languages` with
-two or more codes is kept as a note only. One code locks that language, and
-`--lock-languages` forces the whole list through if you really want it:
+**The language is auto-detected, and sending no hint is deliberate.** A
+multi-language hint list (`hi-IN` + `kn-IN`) makes Hindi win and transcribes
+spoken Kannada into Devanagari. One code locks that language:
 
 ```bash
-python -m voice_logging --contractor-id 1                      # auto-detect
-python -m voice_logging --contractor-id 1 --languages kn-IN    # lock Kannada
+python -m voice_logging --contractor-id 1 --client-id 12
+python -m voice_logging --contractor-id 1 --client-id 12 --languages kn-IN
 ```
 
-Other supported Indic codes: `ta-IN` `te-IN` `ml-IN` `bn-IN` `pa-IN` `as-IN`
-`or-IN`. Auto-detect covers them already; what a new language needs is
-*extraction* support — add its digit words and its "labour only" / "with
-material" phrasings to `SYSTEM_PROMPT` in `extractor.py`, the way Kannada is
-wired in now.
-
 **Speech biasing is the cheapest accuracy lever.** `CUSTOM_VOCABULARY` in
-`config.py` seeds the ASR with Pidilite brands, materials, UOMs as actually
-spoken (`bori`, `katta`, `nag`) and amount scales. If a term keeps coming
-through wrong, add it there first — up to 1000 terms.
-
-It deliberately holds **no romanized digit words**. Under auto-detect the Hindi
-and Kannada sets compete with each other, and SMART mode already emits spoken
-digits as numerals unaided — a live Kannada run produced `phone number 92665243`
-on its own, and `ombattu entu elu…` still resolves to `9876543210` because the
-*extraction prompt* maps digit words. Biasing the ASR was the wrong layer.
-
-**A turn that contained something never disappears.** The extractor returns
-`NONE` only for speech with nothing in it. If a name and a client-or-dealer cue
-are present it must classify, however messy the turn — a contradiction nulls
-just that one field and says so, rather than costing you the record. When it
-does return `NONE` on a turn that had a name or digits in it, it has to say why,
-and that reason is printed. Two entities in one breath yields the first as the
-record plus `also heard DEALER … — say it again on its own`; a turn dropped by
-`--min-confidence` still prints what it heard, so you know which part to repeat.
-
-**Phone numbers fail closed.** They are the one field where a wrong value is
-worse than a missing one — `phone_number` is `NOT NULL` and indexed on `client`.
-Anything that does not resolve to exactly 10 digits after stripping `+91` and a
-leading `0` is dropped with a warning rather than truncated or padded.
-
-**`projectType` is never guessed.** If the speaker did not say which, it stays
-null and the record shows as incomplete. It is a required field, so guessing it
-would silently mislabel the job.
+`config.py` seeds the ASR with Pidilite brands, materials, and UOMs as spoken
+(`bori`, `katta`, `nag`). If a term keeps coming through wrong, add it there
+first — up to 1000 terms. Romanized digit words stay out of that list; the
+extraction prompt still maps them.
 
 **Validation mirrors the Go layer.** `schemas.py` reproduces
-`Validator/ClientValidator.go` and `Validator/DealerValidator.go` — including
-their exact message text and the fact that Go's `len()` counts bytes, so the
-255-character cap is about 85 Devanagari characters. `selftest.py` asserts that
-parity; if the Go validators change, that suite is where the drift surfaces.
-
-**The duplicate probe is a similarity probe.** Both repositories filter with
-`LIKE '%name%'`, so it surfaces near-matches too, and marks exact ones. There is
-no uniqueness constraint on client or dealer names — nothing but this prompt
-stops you creating the same contact three times.
+`Validator/MaterialOrderValidator.go` — including exact message text and the
+fact that Go's `len()` counts bytes, so the 255-character `itemName` cap is
+about 85 Devanagari characters. `selftest.py` asserts that parity; if the Go
+validator changes, that suite is where the drift surfaces.
 
 ## Scope
 
-Client and dealer creation only. Material orders reference client and dealer by
-ID and error if they do not exist (`MaterialOrderService.go`), so extracting one
-from speech would need a name→ID resolution step against the API first.
+The Items section of one order screen. Clients, dealers, order type, amounts
+and image uploads are all handled by the screen itself.

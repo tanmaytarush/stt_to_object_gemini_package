@@ -12,9 +12,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from google import genai
-from google.genai import types
-
 from . import config
 from .audio import MicStream
 
@@ -72,7 +69,7 @@ class Transcriber:
     def __init__(self, settings: config.Settings, mic: MicStream) -> None:
         self._settings = settings
         self._mic = mic
-        self._client = genai.Client(api_key=settings.api_key)
+        self._client = None
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._stop = asyncio.Event()
         self.epoch = 0
@@ -120,7 +117,9 @@ class Transcriber:
     def _emit(self, event: Event) -> None:
         self._events.put_nowait(event)
 
-    def _live_config(self) -> types.LiveConnectConfig:
+    def _live_config(self):
+        from google.genai import types
+
         transcription = types.AudioTranscriptionConfig(
             # Empty = auto-detect the language being spoken. A 5-way hint
             # list (hi+kn+…) makes Hindi steal Kannada into Devanagari.
@@ -136,6 +135,10 @@ class Transcriber:
         )
 
     async def _one_session(self) -> None:
+        from google import genai
+
+        if self._client is None:
+            self._client = genai.Client(api_key=self._settings.api_key)
         first = self.epoch == 1
         async with self._client.aio.live.connect(
             model=config.STT_MODEL, config=self._live_config()
@@ -200,6 +203,8 @@ class Transcriber:
                 await _shutdown(children)
 
     async def _pump_audio(self, session) -> None:
+        from google.genai import types
+
         while True:
             chunk = await self._mic.read()
             await session.send_realtime_input(
