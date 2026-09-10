@@ -13,8 +13,8 @@ import sys
 
 import numpy as np
 
+from ..common.exceptions import MicrophoneError
 from . import config
-from .exceptions import MicrophoneError
 
 
 def _import_sounddevice():

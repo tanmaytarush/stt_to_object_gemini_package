@@ -8,12 +8,12 @@ import sys
 import time
 from typing import Optional
 
+from ..common.exceptions import MicrophoneError
+from ..common.schemas import ValidationFailure
+from ..common.sink import StarshipClient, curl_for, render_body
 from . import config
-from .audio import MicStream, list_devices
-from .exceptions import MicrophoneError
+from .capture import MicStream, list_devices
 from .extractor import Extractor, TurnResult
-from .schemas import ValidationFailure
-from .sink import StarshipClient, curl_for, render_body
 from .transcriber import Final, Interim, Notice, Transcriber
 
 # --- console ----------------------------------------------------------------

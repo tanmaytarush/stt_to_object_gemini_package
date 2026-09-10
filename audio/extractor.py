@@ -13,8 +13,9 @@ import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ..common.schemas import ValidationFailure, _normalize_item, build_dto
 from . import config
-from .schemas import Extraction, ValidationFailure, _normalize_item, build_dto
+from .schemas import Extraction
 
 # Measured on gemini-3.5-flash with this system prompt: 13.5–20s per turn,
 # steady state, not a cold start. The old 20s ceiling sat right on top of that

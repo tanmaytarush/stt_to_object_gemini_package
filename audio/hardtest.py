@@ -1,9 +1,8 @@
-"""Live extraction soak: `python -m voice_logging.hardtest`.
+"""Live extraction soak: `python -m voice_logging.hardtest` (or `.audio.hardtest`).
 
 Feeds long contractor sessions through the same Flash extraction + merge path
 as `--text` / the mic loop. Needs GEMINI_API_KEY. No microphone.
 
-    cd scripts
     python -m voice_logging.hardtest
     python -m voice_logging.hardtest --list
     python -m voice_logging.hardtest --only site-dump-oneshot,drop-minefield
@@ -349,7 +348,7 @@ async def _main_async(args: argparse.Namespace) -> int:
     if not api_key:
         print(
             "GEMINI_API_KEY is missing. Export it, or copy "
-            "scripts/voice_logging/.env.example to .env.",
+            ".env.example to .env.",
             file=sys.stderr,
         )
         return 2
@@ -384,7 +383,7 @@ async def _main_async(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="python -m voice_logging.hardtest")
+    parser = argparse.ArgumentParser(prog="python -m voice_logging.audio.hardtest")
     parser.add_argument("--only", help="Comma-separated scenario ids")
     parser.add_argument("--list", action="store_true", help="List scenarios and exit")
     parser.add_argument("--dump", action="store_true",

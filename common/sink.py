@@ -11,14 +11,14 @@ from typing import Optional
 
 import httpx
 
-from . import config
+from .config import BaseSettings
 
 
 def render_body(dto) -> str:
     return json.dumps(dto.request_body(), indent=2, ensure_ascii=False)
 
 
-def curl_for(settings: config.Settings, dto) -> str:
+def curl_for(settings: BaseSettings, dto) -> str:
     url = settings.order_url
     body = json.dumps(dto.request_body(), ensure_ascii=False)
     return (
@@ -30,7 +30,7 @@ def curl_for(settings: config.Settings, dto) -> str:
 
 
 class StarshipClient:
-    def __init__(self, settings: config.Settings) -> None:
+    def __init__(self, settings: BaseSettings) -> None:
         self._settings = settings
         self._http = httpx.AsyncClient(
             timeout=10.0,

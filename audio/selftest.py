@@ -1,4 +1,4 @@
-"""Offline checks: `python -m voice_logging.selftest`.
+"""Offline checks: `python -m voice_logging.selftest` (or `.audio.selftest`).
 
 Exercises everything except the two network calls — validator parity with the
 Go layer, item merge across turns, and DTO shaping. Needs no API key and no
@@ -14,16 +14,16 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import Settings
-from .extractor import Extractor
-from .schemas import (
-    Extraction,
+from ..common.schemas import (
     MaterialOrderDto,
     SpokenItem,
     ValidationFailure,
     build_dto,
 )
-from .sink import curl_for
+from ..common.sink import curl_for
+from .config import Settings
+from .extractor import Extractor
+from .schemas import Extraction
 
 _FAILURES: list[str] = []
 _CHECKS = 0
@@ -557,7 +557,7 @@ TESTS = [
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="python -m voice_logging.selftest")
+    parser = argparse.ArgumentParser(prog="python -m voice_logging.audio.selftest")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 

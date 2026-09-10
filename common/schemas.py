@@ -1,10 +1,9 @@
-"""Two schema layers for material-order logging.
+"""Shared output object: item rows framed as a material-order DTO.
 
-Layer 1 (`Extraction`) is what the LLM fills in from speech, and it covers the
-Items section of the New Order screen and nothing else: itemName, quantity, uom.
-Layer 2 (`MaterialOrderDto`) is the POST /starship/v1/material-order body.
+`SpokenItem` is the unit both extractors produce (audio turns and, later, OCR).
+`MaterialOrderDto` is the POST /starship/v1/material-order body.
 contractorId, clientId, dealerId and orderType come from the screen the user is
-already on — never from speech.
+already on — never from speech or an image.
 
 Validators mirror Validator/MaterialOrderValidator.go, including message text.
 Go's `len()` counts BYTES.
@@ -12,7 +11,7 @@ Go's `len()` counts BYTES.
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +28,7 @@ class ValidationFailure(Exception):
 
 
 class SpokenItem(BaseModel):
-    """One line item heard in a turn. Nested objects are allowed; dict/Any are not."""
+    """One line item: name, quantity, unit. Nested objects are allowed; dict/Any are not."""
 
     item_name: str = Field(description="Material name, e.g. Fevicol SH, cement.")
     quantity: int = Field(description="Whole units only, greater than 0.")
@@ -38,41 +37,12 @@ class SpokenItem(BaseModel):
     )
 
 
-class Extraction(BaseModel):
-    """The LLM's report of one spoken turn. Item rows only, nothing else."""
-
-    entity: Literal["ITEMS", "NONE"] = Field(
-        description="ITEMS if the speaker named any material. "
-                    "NONE for chatter with no items."
-    )
-    confidence: float = Field(
-        description="0.0 to 1.0 for the item rows you filled."
-    )
-    items: list[SpokenItem] = Field(
-        default_factory=list,
-        description="Line items heard THIS turn. Empty if none. Do not repeat "
-                    "items already in the in-progress list unless correcting.",
-    )
-    is_correction: bool = Field(
-        default=False,
-        description="True if this turn replaces the item list rather than "
-                    "adding to it.",
-    )
-    notes: Optional[str] = Field(
-        default=None,
-        description="One short line on ambiguity, e.g. a missing uom. "
-                    "Null if clean.",
-    )
-
-    def filled_fields(self) -> dict[str, object]:
-        return {"items": list(self.items)} if self.items else {}
-
-
 class MaterialOrderDto(BaseModel):
     """Mirrors RequestDtos.CreateMaterialOrderRequestDto.
 
-    Only `orderItems` is ever filled from speech. `amount` and `itemSummary`
-    exist because the Go DTO has them, and stay at their defaults here.
+    Only `orderItems` is ever filled from audio or OCR. `amount` and
+    `itemSummary` exist because the Go DTO has them, and stay at their
+    defaults here.
     """
 
     contractorId: int
@@ -170,7 +140,7 @@ def _normalize_item(item: SpokenItem | dict) -> Optional[dict]:
 
 
 def build_dto(settings, fields: dict[str, object]) -> MaterialOrderDto:
-    """Wrap the spoken item rows in the surrounding screen's identifiers."""
+    """Wrap extracted item rows in the surrounding screen's identifiers."""
     normalized = [row for row in (_normalize_item(item)
                                   for item in fields.get("items") or []) if row]
     return MaterialOrderDto(
