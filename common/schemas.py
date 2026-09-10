@@ -22,7 +22,6 @@ ORDER_TYPES = (ORDER_TYPE_MAT_ORDER, ORDER_TYPE_MAT_LIST)
 MAX_ITEM_NAME_BYTES = 255
 MAX_UOM_BYTES = 30
 
-
 class ValidationFailure(Exception):
     """Mirrors a rejection the Go validator would have produced."""
 
