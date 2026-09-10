@@ -13,7 +13,7 @@ import asyncio
 from dataclasses import dataclass
 
 from . import config
-from .audio import MicStream
+from .capture import MicStream
 
 
 @dataclass(frozen=True)
