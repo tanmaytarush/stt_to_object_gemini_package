@@ -1,6 +1,7 @@
 """OCR-module settings: image path(s) plus the shared screen context."""
 
 from __future__ import annotations
+
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,34 +15,38 @@ MIME_BY_SUFFIX = {
     ".webp": "image/webp",
     ".gif": "image/gif",
     ".heic": "image/heic",
-    ".heif": "image/heif",
+    ".heif": "image/heic",
 }
 
+
 @dataclass
-class Settinds(BaseSettings):
+class Settings(BaseSettings):
     image_paths: list[Path] = field(default_factory=list)
 
-class mime_for(path: Path) -> str:
+
+def mime_for(path: Path) -> str:
     suffix = path.suffix.lower()
     mime = MIME_BY_SUFFIX.get(suffix)
     if mime is None:
         raise SystemExit(
-            f"Unsupported image file: {suffix or path.name!r} - "
-            f"Use {', '.join(sorted(MIME_BY_SUFFIX))}"
+            f"unsupported image type {suffix or path.name!r} — "
+            f"use {', '.join(sorted(MIME_BY_SUFFIX))}"
         )
     return mime
+
 
 def read_image(path: Path) -> tuple[bytes, str]:
     mime = mime_for(path)
     try:
         data = path.read_bytes()
     except OSError as exc:
-        raise SystemExit(f"Could not read {path}: {exc}") from exc
+        raise SystemExit(f"could not read {path}: {exc}") from exc
     if not data:
         raise SystemExit(f"{path} is empty")
     return data, mime
 
-def build_parser(parser: argparser.ArgumentParser):
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m voice_logging ocr",
         description=(
@@ -59,7 +64,8 @@ def build_parser(parser: argparser.ArgumentParser):
     )
     return p
 
-def resolve(args: argparser.Namespace) -> Settings:
+
+def resolve(args: argparse.Namespace) -> Settings:
     shared = resolve_shared(args)
     raw = args.images or []
     if not raw:
@@ -70,10 +76,7 @@ def resolve(args: argparser.Namespace) -> Settings:
         path = Path(item).expanduser()
         if not path.is_file():
             raise SystemExit(f"image not found: {path}")
-        mime_for(path) # fail early on a bad suffix
+        mime_for(path)  # fail early on a bad suffix
         paths.append(path)
 
-    return Settings(
-        **shared, 
-        image_paths = paths
-    )
+    return Settings(**shared, image_paths=paths)
